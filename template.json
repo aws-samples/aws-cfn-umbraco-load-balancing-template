@@ -1,0 +1,278 @@
+{
+   "AWSTemplateFormatVersion": "2010-09-09",
+   "Description": "AWS CloudFormation sample template for Umbraco Flexible Load Balancing. This template builds a sample infrastructure to host Umbraco CMS with flexible load balancing feature introduced in v7.3. It creates a singe instance Elastic Beanstalk environment for system administrators/editors, a load balanced Elastic Beanstalk environment for public users, an Amazon RDS MSSQL database for content storage, and configures the security groups and rules. **WARNING** This template creates two Amazon EC2 instances and one Amazon RDS database instance. You will be billed for the AWS resources used if you create a stack from this template.",
+   "Parameters": {
+       "ApplicationName": {
+           "Default": "UmbracoApp",
+           "Description": "The name of the Umbraco Application",
+           "Type": "String"
+       },
+       "SolutionStackName": {
+           "Default": "64bit Windows Server 2012 R2 v1.2.0 running IIS 8.5",
+           "Description": "The name of an Elastic Beanstalk solution stack that this configuration will use. For full list, look for Supported Platforms in the AWS Elastic Beanstalk Developer Guide",
+           "Type": "String"
+       },
+       "DBUsername": {
+           "Default": "admin",
+           "Description": "The name of master user for the client DB Instance.",
+           "Type": "String",
+           "MinLength": "1",
+           "MaxLength": "16",
+           "AllowedPattern": "[a-zA-Z][a-zA-Z0-9]*",
+           "ConstraintDescription": "must begin with a letter and contain only alphanumeric characters."
+       },
+       "DBPassword": {
+           "NoEcho": "true",
+           "Description": "The master password for the DB instance.",
+           "Type": "String",
+           "MinLength": "8",
+           "MaxLength": "41",
+           "AllowedPattern": "[a-zA-Z0-9]+",
+           "ConstraintDescription": "must contain only alphanumeric characters."
+       },
+       "DBClass": {
+           "Default": "db.t2.micro",
+           "Description": "Database instance class",
+           "Type": "String",
+           "AllowedValues": ["db.m1.small", "db.t2.medium", "db.t2.micro", "db.t2.small"],
+           "ConstraintDescription": "must select a valid database instance type."
+       },
+       "DBAllocatedStorage": {
+           "Default": "20",
+           "Description": "The size of the database (Gb)",
+           "Type": "Number",
+           "MinValue": "20",
+           "MaxValue": "1024",
+           "ConstraintDescription": "must be between 20 and 1024Gb."
+       },
+       "InstanceTypeAdminEnv": {
+           "Description": "Administrators/Editors Environment EC2 instance type",
+           "Type": "String",
+           "Default": "t2.micro",
+           "AllowedValues": ["t2.micro", "t2.small", "t2.medium", "t2.large", "m3.medium", "m3.large", "m3.xlarge", "m3.2xlarge", "c3.large", "c3.xlarge", "c3.2xlarge", "c3.4xlarge", "c3.8xlarge", "t2.nano", "m1.small", "m1.medium", "m1.large", "m1.xlarge", "c1.medium", "c1.xlarge", "c4.large", "c4.xlarge", "c4.2xlarge", "c4.4xlarge", "c4.8xlarge", "m2.xlarge", "m2.2xlarge", "m2.4xlarge", "m4.large", "m4.xlarge", "m4.2xlarge", "m4.4xlarge", "m4.10xlarge", "cc2.8xlarge", "hi1.4xlarge", "hs1.8xlarge", "cr1.8xlarge", "g2.2xlarge", "g2.8xlarge", "i2.xlarge", "i2.2xlarge", "i2.4xlarge", "i2.8xlarge", "r3.large", "r3.xlarge", "r3.2xlarge", "r3.4xlarge", "r3.8xlarge"],
+           "ConstraintDescription": "must be a valid EC2 instance type."
+       },
+       "InstanceTypeFrontendEnv": {
+           "Description": "Frontend Environment EC2 instances type",
+           "Type": "String",
+           "Default": "t2.micro",
+           "AllowedValues": ["t2.micro", "t2.small", "t2.medium", "t2.large", "m3.medium", "m3.large", "m3.xlarge", "m3.2xlarge", "c3.large", "c3.xlarge", "c3.2xlarge", "c3.4xlarge", "c3.8xlarge", "t2.nano", "m1.small", "m1.medium", "m1.large", "m1.xlarge", "c1.medium", "c1.xlarge", "c4.large", "c4.xlarge", "c4.2xlarge", "c4.4xlarge", "c4.8xlarge", "m2.xlarge", "m2.2xlarge", "m2.4xlarge", "m4.large", "m4.xlarge", "m4.2xlarge", "m4.4xlarge", "m4.10xlarge", "cc2.8xlarge", "hi1.4xlarge", "hs1.8xlarge", "cr1.8xlarge", "g2.2xlarge", "g2.8xlarge", "i2.xlarge", "i2.2xlarge", "i2.4xlarge", "i2.8xlarge", "r3.large", "r3.xlarge", "r3.2xlarge", "r3.4xlarge", "r3.8xlarge"],
+           "ConstraintDescription": "must be a valid EC2 instance type."
+       },
+       "IPAccessAdminEnv": {
+           "Description": "The IP address range to access Admin Environment via HTTP. Default is from anywhere (0.0.0.0/0)",
+           "Type": "String",
+           "MinLength": "9",
+           "MaxLength": "18",
+           "Default": "0.0.0.0/0",
+           "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+           "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x."
+       },
+       "IPAccessFrontendEnv": {
+           "Description": "The IP address range to access Frontend Environment via HTTP. Default is from anywhere (0.0.0.0/0)",
+           "Type": "String",
+           "MinLength": "9",
+           "MaxLength": "18",
+           "Default": "0.0.0.0/0",
+           "AllowedPattern": "(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})\\.(\\d{1,3})/(\\d{1,2})",
+           "ConstraintDescription": "must be a valid IP CIDR range of the form x.x.x.x/x."
+       }
+   },
+   "Conditions": {
+       "Is-EC2-CN": { "Fn::Equals": [{ "Ref": "AWS::Region" }, "cn-north-1"] }
+   },
+   "Resources": {
+       "EBApplication": {
+           "Type": "AWS::ElasticBeanstalk::Application",
+           "Properties": {
+               "ApplicationName": { "Ref": "ApplicationName" },
+               "Description": "AWS Elastic Beanstalk Windows Sample Application"
+           }
+       },
+       "EBApplicationVersion": {
+           "Type": "AWS::ElasticBeanstalk::ApplicationVersion",
+           "Properties": {
+               "ApplicationName": { "Ref": "EBApplication" },
+               "Description": "AWS ElasticBeanstalk Sample Application Version",
+               "SourceBundle": {
+                   "S3Bucket": { "Fn::Join": ["-", ["elasticbeanstalk-samples", { "Ref": "AWS::Region" }]] },
+                   "S3Key": "FirstSample.zip"
+               }
+           }
+       },
+       "EBInstanceProfileRole": {
+           "Type": "AWS::IAM::Role",
+           "Properties": {
+               "AssumeRolePolicyDocument": {
+                   "Version": "2012-10-17",
+                   "Statement": [
+                       {
+                           "Sid": "",
+                           "Effect": "Allow",
+                           "Principal": {
+                               "Service": [{ "Fn::If": ["Is-EC2-CN", "ec2.amazonaws.com.cn", "ec2.amazonaws.com"] }]
+                           },
+                           "Action": "sts:AssumeRole"
+                       }
+                   ]
+               },
+               "ManagedPolicyArns": [
+                   "arn:aws:iam::aws:policy/AWSElasticBeanstalkWebTier"
+               ]
+           }
+       },
+       "EBInstanceProfile": {
+           "Type": "AWS::IAM::InstanceProfile",
+           "Properties": {
+               "Path": "/",
+               "Roles": [
+                   {
+                       "Ref": "EBInstanceProfileRole"
+                   }
+               ]
+           }
+       },
+       "EBServiceRole": {
+           "Type": "AWS::IAM::Role",
+           "Properties": {
+               "AssumeRolePolicyDocument": {
+                   "Version": "2012-10-17",
+                   "Statement": [
+                       {
+                           "Sid": "",
+                           "Effect": "Allow",
+                           "Principal": {
+                               "Service": "elasticbeanstalk.amazonaws.com"
+                           },
+                           "Action": "sts:AssumeRole",
+                           "Condition": {
+                               "StringEquals": {
+                                   "sts:ExternalId": "elasticbeanstalk"
+                               }
+                           }
+                       }
+                   ]
+               },
+               "ManagedPolicyArns": [
+                   "arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkService",
+                   "arn:aws:iam::aws:policy/service-role/AWSElasticBeanstalkEnhancedHealth"
+               ]
+           }
+       },
+       "AdministratorsEnvironment": {
+           "Type": "AWS::ElasticBeanstalk::Environment",
+           "Properties": {
+               "ApplicationName": { "Ref": "EBApplication" },
+               "Description": "AWS Elastic Beanstalk Administrators/Editors Single Instance Environment",
+               "VersionLabel": { "Ref": "EBApplicationVersion" },
+               "SolutionStackName": { "Ref": "SolutionStackName" },
+               "OptionSettings": [{
+                   "Namespace": "aws:autoscaling:launchconfiguration",
+                   "OptionName": "SecurityGroups",
+                   "Value": { "Ref": "WebAdminSecurityGroup" }
+               }, {
+                   "Namespace": "aws:autoscaling:launchconfiguration",
+                   "OptionName": "IamInstanceProfile",
+                   "Value": { "Ref": "EBInstanceProfile" }
+               }, {
+                   "Namespace": "aws:autoscaling:launchconfiguration",
+                   "OptionName": "InstanceType",
+                   "Value": { "Ref": "InstanceTypeAdminEnv" }
+               }, {
+                   "Namespace": "aws:elasticbeanstalk:environment",
+                   "OptionName": "EnvironmentType",
+                   "Value": "SingleInstance"
+               }, {
+                   "Namespace": "aws:elasticbeanstalk:environment",
+                   "OptionName": "ServiceRole",
+                   "Value": { "Ref": "EBServiceRole" }
+               }]
+           }
+       },
+       "FrontendEnvironment": {
+           "Type": "AWS::ElasticBeanstalk::Environment",
+           "Properties": {
+               "ApplicationName": { "Ref": "EBApplication" },
+               "Description": "AWS Elastic Beanstalk Frontend Load Balanced Environment",
+               "VersionLabel": { "Ref": "EBApplicationVersion" },
+               "SolutionStackName": { "Ref": "SolutionStackName" },
+               "OptionSettings": [{
+                   "Namespace": "aws:autoscaling:launchconfiguration",
+                   "OptionName": "SecurityGroups",
+                   "Value": { "Ref": "WebSecurityGroup" }
+               }, {
+                   "Namespace": "aws:autoscaling:launchconfiguration",
+                   "OptionName": "IamInstanceProfile",
+                   "Value": { "Ref": "EBInstanceProfile" }
+               }, {
+                   "Namespace": "aws:autoscaling:launchconfiguration",
+                   "OptionName": "InstanceType",
+                   "Value": { "Ref": "InstanceTypeFrontendEnv" }
+               }, {
+                   "Namespace": "aws:elasticbeanstalk:environment",
+                   "OptionName": "EnvironmentType",
+                   "Value": "LoadBalanced"
+               }, {
+                   "Namespace": "aws:elasticbeanstalk:environment",
+                   "OptionName": "ServiceRole",
+                   "Value": { "Ref": "EBServiceRole" }
+               }, {
+                   "Namespace": "aws:elb:policies",
+                   "OptionName": "Stickiness Policy",
+                   "Value": "true"
+               }]
+           }
+       },
+       "DBInstance": {
+           "Type": "AWS::RDS::DBInstance",
+           "Properties": {
+               "AllocatedStorage": { "Ref": "DBAllocatedStorage" },
+               "DBInstanceClass": { "Ref": "DBClass" },
+               "VPCSecurityGroups": [{ "Fn::GetAtt": ["DBSecurityGroup", "GroupId"] }],
+               "Engine": "sqlserver-ex",
+               "MasterUsername": { "Ref": "DBUsername" },
+               "MasterUserPassword": { "Ref": "DBPassword" }
+           }
+       },
+       "DBSecurityGroup": {
+           "Type": "AWS::EC2::SecurityGroup",
+           "Properties": {
+               "GroupDescription": "Enable database access to the application",
+               "SecurityGroupIngress": [{
+                   "FromPort": "1433",
+                   "ToPort": "1433",
+                   "IpProtocol": "tcp",
+                   "SourceSecurityGroupId": { "Fn::GetAtt": ["WebSecurityGroup", "GroupId"] }
+               }, {
+                   "FromPort": "1433",
+                   "ToPort": "1433",
+                   "IpProtocol": "tcp",
+                   "SourceSecurityGroupId": { "Fn::GetAtt": ["WebAdminSecurityGroup", "GroupId"] }
+               }]
+           }
+       },
+       "WebSecurityGroup": {
+           "Type": "AWS::EC2::SecurityGroup",
+           "Properties": {
+               "GroupDescription": "Enable HTTP access via port 80",
+               "SecurityGroupIngress": [
+                   {
+                       "IpProtocol": "tcp",
+                       "FromPort": "80",
+                       "ToPort": "80",
+                       "CidrIp": { "Ref": "IPAccessFrontendEnv" }
+                   }
+               ]
+           }
+       },
+       "WebAdminSecurityGroup": {
+           "Type": "AWS::EC2::SecurityGroup",
+           "Properties": {
+               "GroupDescription": "Enable HTTP access via port 80",
+               "SecurityGroupIngress": [
+                   { "IpProtocol": "tcp", "FromPort": "80", "ToPort": "80", "CidrIp": { "Ref": "IPAccessAdminEnv" } }
+               ]
+           }
+       }
+   }
+}
